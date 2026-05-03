@@ -1,0 +1,32 @@
+# Unreal Engine generated directories
+Binaries/
+Build/
+Content/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# VS Code generated compile commands (thousands of files, UE-generated)
+.vscode/compileCommands_*/
+.vscode/compileCommands_*.json
+
+# Visual Studio
+.vs/
+*.sln
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+*.opensdf
+*.sdf
+
+# JetBrains Rider
+.idea/
+*.DotSettings.user
+
+# macOS
+.DS_Store
+
+# Plugin binaries/intermediate (keep source)
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
