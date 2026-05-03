@@ -1,5 +1,6 @@
 #include "PlayerCharacter.h"
 #include "HeroAnimInstance.h"
+#include "EnemyCharacter.h"
 
 #include "CineCameraComponent.h"
 #include "Camera/CameraActor.h"
@@ -12,7 +13,6 @@
 #include "Components/CapsuleComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
-#include "DrawDebugHelpers.h"
 #include "Sound/SoundBase.h"
 #include "AnimSequences/PaperZDAnimSequence.h"
 
@@ -397,20 +397,16 @@ void APlayerCharacter::OnAttackHitWindowOpen()
 	GetWorld()->SweepMultiByChannel(Hits, Origin, End, FQuat::Identity,
 		ECC_Pawn, FCollisionShape::MakeBox(HalfBox), Params);
 
-#if WITH_EDITOR
-	DrawDebugBox(GetWorld(), (Origin + End) * 0.5f, HalfBox,
-		Hits.Num() > 0 ? FColor::Red : FColor::Green, false, 0.5f);
-#endif
 
 	bool bLandedHit = false;
 	for (const FHitResult& Hit : Hits)
 	{
-		if (AActor* Actor = Hit.GetActor())
-		{
-			UGameplayStatics::ApplyDamage(Actor, AttackDamage,
-				GetController(), this, UDamageType::StaticClass());
-			bLandedHit = true;
-		}
+		AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Hit.GetActor());
+		if (!Enemy) continue;
+
+		UGameplayStatics::ApplyDamage(Enemy, AttackDamage,
+			GetController(), this, UDamageType::StaticClass());
+		bLandedHit = true;
 	}
 
 	if (bLandedHit)
@@ -437,6 +433,7 @@ float APlayerCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Damag
 	AController* EventInstigator, AActor* DamageCauser)
 {
 	if (bIsDead) return 0.f;
+	if (DamageCauser == this) return 0.f;
 
 	const float Applied = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 	CurrentHealth = FMath::Clamp(CurrentHealth - Applied, 0.f, MaxHealth);

@@ -33,9 +33,16 @@ Enemies have drained the forest of its life force, leaving the world in a monoch
 
 ## Screenshots
 
-<!-- Drop screenshots into gameplay/screenshots/ then update below -->
-
-*Screenshots coming soon.*
+<table>
+  <tr>
+    <td><img src="gameplay/screenshots/SS.SpiritlessGP.png" alt="Spiritless gameplay 1"/></td>
+    <td><img src="gameplay/screenshots/SS.SpiritlessGP (2).png" alt="Spiritless gameplay 2"/></td>
+  </tr>
+  <tr>
+    <td><img src="gameplay/screenshots/SS.SpiritlessGP (3).png" alt="Spiritless gameplay 3"/></td>
+    <td><img src="gameplay/screenshots/SS.SpiritlessGP (4).png" alt="Spiritless gameplay 4"/></td>
+  </tr>
+</table>
 
 ---
 
