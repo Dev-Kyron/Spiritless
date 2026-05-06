@@ -33,7 +33,7 @@ Enemies have drained the forest of its life force, leaving the world in a monoch
 
 ## Gameplay Video
 
-![Devlog 01 — First Look at Spiritless](gameplay/Devlog_01.mp4)
+https://github.com/Dev-Kyron/Spiritless/raw/main/gameplay/Devlog_01.mp4
 
 > Also on YouTube: [Devlog #01 — First Look at Spiritless](https://www.youtube.com/watch?v=eIbekT0Brvs)
 
