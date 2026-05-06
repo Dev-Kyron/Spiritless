@@ -33,7 +33,7 @@ Enemies have drained the forest of its life force, leaving the world in a monoch
 
 ## Gameplay Video
 
-[![Watch Gameplay](https://img.youtube.com/vi/eIbekT0Brvs/maxresdefault.jpg)](https://www.youtube.com/watch?v=eIbekT0Brvs)
+[![Watch Gameplay](https://img.youtube.com/vi/eIbekT0Brvs/hqdefault.jpg)](https://www.youtube.com/watch?v=eIbekT0Brvs)
 
 ---
 
@@ -41,12 +41,12 @@ Enemies have drained the forest of its life force, leaving the world in a monoch
 
 <table>
   <tr>
-    <td><img src="gameplay/screenshots/SS.SpiritlessGP.png" alt="Spiritless gameplay 1"/></td>
-    <td><img src="gameplay/screenshots/SS.SpiritlessGP (2).png" alt="Spiritless gameplay 2"/></td>
+    <td><img src="gameplay/screenshots/Combat.jpg" alt="Combat"/></td>
+    <td><img src="gameplay/screenshots/3D.png" alt="3D World"/></td>
   </tr>
   <tr>
-    <td><img src="gameplay/screenshots/SS.SpiritlessGP (3).png" alt="Spiritless gameplay 3"/></td>
-    <td><img src="gameplay/screenshots/SS.SpiritlessGP (4).png" alt="Spiritless gameplay 4"/></td>
+    <td><img src="gameplay/screenshots/Interaction.jpg" alt="Interaction"/></td>
+    <td><img src="gameplay/screenshots/Start.png" alt="Start"/></td>
   </tr>
 </table>
 
