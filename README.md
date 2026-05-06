@@ -33,7 +33,7 @@ Enemies have drained the forest of its life force, leaving the world in a monoch
 
 ## Gameplay Video
 
-[![Watch Gameplay – Devlog #01](gameplay/screenshots/Combat.jpg)](https://www.youtube.com/watch?v=eIbekT0Brvs)
+[![Watch Gameplay – Devlog #01](gameplay/screenshots/Thumbnail.png)](https://www.youtube.com/watch?v=eIbekT0Brvs)
 
 ---
 
