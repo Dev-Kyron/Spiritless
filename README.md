@@ -63,7 +63,7 @@ Enemies have drained the forest of its life force, leaving the world in a monoch
 | **GPU** | NVIDIA GTX 1070 / AMD RX 5700 | NVIDIA RTX 3070 / AMD RX 6800 XT |
 | **Storage** | 15 GB available | SSD recommended |
 
-> This project is source-only. To open it you will need Unreal Engine 5.5 or later installed via the Epic Games Launcher.
+> A playable demo is currently in development. Source requires Unreal Engine 5.5 or later via the Epic Games Launcher.
 
 ---
 
