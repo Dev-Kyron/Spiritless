@@ -46,6 +46,21 @@ Enemies have drained the forest of its life force, leaving the world in a monoch
 
 ---
 
+## System Requirements
+
+| | Minimum | Recommended |
+|---|---|---|
+| **OS** | Windows 10 64-bit | Windows 11 64-bit |
+| **Engine** | Unreal Engine 5.5 | Unreal Engine 5.7+ |
+| **CPU** | Intel i5-8600 / AMD Ryzen 5 3600 | Intel i7-12700 / AMD Ryzen 7 5800X |
+| **RAM** | 16 GB | 32 GB |
+| **GPU** | NVIDIA GTX 1070 / AMD RX 5700 | NVIDIA RTX 3070 / AMD RX 6800 XT |
+| **Storage** | 15 GB available | SSD recommended |
+
+> This project is source-only. To open it you will need Unreal Engine 5.5 or later installed via the Epic Games Launcher.
+
+---
+
 ## Current Focus
 
 - Core combat systems
