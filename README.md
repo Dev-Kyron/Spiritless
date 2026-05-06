@@ -33,7 +33,7 @@ Enemies have drained the forest of its life force, leaving the world in a monoch
 
 ## Gameplay Video
 
-[![Watch Gameplay](https://img.shields.io/badge/Watch-Gameplay_Preview-red?style=for-the-badge&logo=youtube)](https://www.youtube.com/watch?v=eIbekT0Brvs)
+[![Watch Gameplay](https://img.youtube.com/vi/eIbekT0Brvs/maxresdefault.jpg)](https://www.youtube.com/watch?v=eIbekT0Brvs)
 
 ---
 
