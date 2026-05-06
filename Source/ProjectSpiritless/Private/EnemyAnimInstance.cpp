@@ -11,5 +11,6 @@ void UEnemyAnimInstance::SyncFromEnemy(AEnemyCharacter* Enemy)
 	bIsWalking      = Enemy->bIsChasing && Speed > 10.f && !Enemy->bIsAttacking && !Enemy->bIsDashAttacking;
 	bIsAttacking    = Enemy->bIsAttacking;
 	bIsDashAttacking = Enemy->bIsDashAttacking;
-	bIsDead         = Enemy->bIsDead;
+	bIsHurt = Enemy->bIsHurt;
+	bIsDead = Enemy->bIsDead;
 }

@@ -1,10 +1,13 @@
 #include "EnemyCharacter.h"
 #include "EnemyAnimInstance.h"
 #include "PlayerCharacter.h"
+#include "SpiritPickup.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/WidgetComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Construction
@@ -45,7 +48,8 @@ void AEnemyCharacter::BeginPlay()
 	CurrentHealth = MaxHealth;
 	GetCharacterMovement()->MaxWalkSpeed = ChaseSpeed;
 
-	CachedPlayer = Cast<APlayerCharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
+	CachedPlayer  = Cast<APlayerCharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
+	PatrolOrigin  = GetActorLocation();
 
 	if (HealthBarWidgetClass)
 	{
@@ -76,6 +80,26 @@ void AEnemyCharacter::Tick(float DeltaTime)
 	if (UEnemyAnimInstance* Anim = Cast<UEnemyAnimInstance>(GetAnimationComponent()->GetAnimInstance()))
 		Anim->SyncFromEnemy(this);
 
+	// ── Walk trail ────────────────────────────────────────────────────────────
+	const bool bIsMovingOnGround = !GetCharacterMovement()->IsFalling()
+	                             && GetCharacterMovement()->Velocity.SizeSquared2D() > 100.f;
+	if (WalkTrailFX && bIsMovingOnGround && !bIsDead)
+	{
+		TrailAccumulator += DeltaTime;
+		if (TrailAccumulator >= TrailInterval)
+		{
+			TrailAccumulator = 0.f;
+			const FVector MoveDir  = GetCharacterMovement()->Velocity.GetSafeNormal2D();
+			const FVector Feet     = GetActorLocation() - FVector(0, 0, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+			const FVector TrailPos = Feet - MoveDir * 20.f;
+			UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), WalkTrailFX, TrailPos, FRotator::ZeroRotator, FVector(1.2f));
+		}
+	}
+	else
+	{
+		TrailAccumulator = 0.f;
+	}
+
 	if (bIsDead || !CachedPlayer || CachedPlayer->bIsDead)
 	{
 		bIsChasing = false;
@@ -86,9 +110,34 @@ void AEnemyCharacter::Tick(float DeltaTime)
 	const FVector PlayerLoc = CachedPlayer->GetActorLocation();
 	const float   Dist      = FVector::Dist(MyLoc, PlayerLoc);
 
-	if (Dist > DetectionRange)
+	// Aggro hysteresis — engage at DetectionRange, drop only at DetectionRange * AggroDropMultiplier
+	if (Dist <= DetectionRange)
+		bIsAggro = true;
+	else if (Dist > DetectionRange * AggroDropMultiplier)
+		bIsAggro = false;
+
+	if (!bIsAggro)
 	{
 		bIsChasing = false;
+
+		// Patrol back and forth around origin
+		if (bPatrolEnabled && !bIsStaggered)
+		{
+			const float TargetX = PatrolOrigin.X + (bPatrollingRight ? PatrolDistance : -PatrolDistance);
+			const float DiffX   = TargetX - MyLoc.X;
+
+			if (FMath::Abs(DiffX) < 10.f)
+			{
+				bPatrollingRight = !bPatrollingRight;
+				GetCharacterMovement()->StopMovementImmediately();
+			}
+			else
+			{
+				const float Dir = DiffX > 0.f ? 1.f : -1.f;
+				AddMovementInput(FVector(Dir, 0.f, 0.f), 0.5f);
+				UpdateFacing(Dir);
+			}
+		}
 		return;
 	}
 
@@ -134,8 +183,29 @@ float AEnemyCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Damage
 	const float Applied = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 	CurrentHealth = FMath::Clamp(CurrentHealth - Applied, 0.f, MaxHealth);
 
+	// Knockback — push away from attacker
+	if (DamageCauser)
+	{
+		const FVector KnockDir = (GetActorLocation() - DamageCauser->GetActorLocation()).GetSafeNormal();
+		LaunchCharacter(FVector(KnockDir.X * KnockbackForce, 0.f, KnockbackForce * 0.2f), true, false);
+	}
+
+	// Stagger — only apply if not already staggered or immune (prevents infinite chain-stun)
+	if (!bIsStaggered && !bStaggerImmune)
+	{
+		bIsStaggered = true;
+		GetWorldTimerManager().SetTimer(StaggerHandle, this, &AEnemyCharacter::EndStagger, StaggerDuration, false);
+	}
+	// Hurt flash always resets so every hit registers visually
+	bIsHurt = true;
+	GetWorldTimerManager().ClearTimer(HurtAnimHandle);
+	GetWorldTimerManager().SetTimer(HurtAnimHandle, this, &AEnemyCharacter::EndHurt, HurtAnimDuration, false);
+
 	if (TakeDamageSound)
-		UGameplayStatics::PlaySoundAtLocation(GetWorld(), TakeDamageSound, GetActorLocation());
+		UGameplayStatics::PlaySoundAtLocation(GetWorld(), TakeDamageSound, GetActorLocation(), TakeDamageVolume);
+
+	if (HitFX)
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), HitFX, GetActorLocation(), FRotator::ZeroRotator, FVector(2.5f));
 
 	RefreshHealthBar();
 
@@ -151,13 +221,13 @@ float AEnemyCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Damage
 
 void AEnemyCharacter::PerformMeleeAttack()
 {
-	if (bMeleeOnCooldown || !CachedPlayer) return;
+	if (bMeleeOnCooldown || bIsStaggered || !CachedPlayer) return;
 
 	bMeleeOnCooldown = true;
 	bIsAttacking     = true;
 
 	if (MeleeAttackSound)
-		UGameplayStatics::PlaySoundAtLocation(GetWorld(), MeleeAttackSound, GetActorLocation());
+		UGameplayStatics::PlaySoundAtLocation(GetWorld(), MeleeAttackSound, GetActorLocation(), MeleeAttackVolume);
 
 	// Hit 1 — frame 3 of 14 @ 9fps
 	GetWorldTimerManager().SetTimer(MeleeHit1Handle, this,
@@ -201,13 +271,13 @@ void AEnemyCharacter::ResetMeleeCooldown()
 
 void AEnemyCharacter::PerformDashAttack()
 {
-	if (bDashAttackOnCooldown || bIsDashAttacking || !CachedPlayer) return;
+	if (bDashAttackOnCooldown || bIsDashAttacking || bIsStaggered || !CachedPlayer) return;
 
 	bIsDashAttacking      = true;
 	bDashAttackOnCooldown = true;
 
 	if (DashAttackSound)
-		UGameplayStatics::PlaySoundAtLocation(GetWorld(), DashAttackSound, GetActorLocation());
+		UGameplayStatics::PlaySoundAtLocation(GetWorld(), DashAttackSound, GetActorLocation(), DashAttackVolume);
 
 	// Face the player before lunging
 	FVector Dir = CachedPlayer->GetActorLocation() - GetActorLocation();
@@ -280,10 +350,13 @@ void AEnemyCharacter::Die()
 	GetWorldTimerManager().ClearTimer(DashAttackSliceHandle);
 	GetWorldTimerManager().ClearTimer(DashAttackCooldownHandle);
 	GetWorldTimerManager().ClearTimer(FootstepTimerHandle);
+	GetWorldTimerManager().ClearTimer(StaggerHandle);
+	GetWorldTimerManager().ClearTimer(StaggerImmuneHandle);
+	GetWorldTimerManager().ClearTimer(HurtAnimHandle);
 
 	const FVector DeathLoc = GetActorLocation();
 	if (DeathSound)
-		UGameplayStatics::PlaySoundAtLocation(GetWorld(), DeathSound, DeathLoc);
+		UGameplayStatics::PlaySoundAtLocation(GetWorld(), DeathSound, DeathLoc, DeathVolume);
 
 	GetCharacterMovement()->StopMovementImmediately();
 	GetCharacterMovement()->DisableMovement();
@@ -295,6 +368,10 @@ void AEnemyCharacter::Die()
 	GetWorldTimerManager().SetTimer(DeathSpriteHideHandle, this,
 		&AEnemyCharacter::HideDeathSprite, DeathSpriteHideDelay, false);
 
+	// Scatter spirit pickups after a short delay
+	if (SpiritPickupClass)
+		GetWorldTimerManager().SetTimer(SpiritSpawnHandle, this, &AEnemyCharacter::SpawnSpiritDrops, SpiritSpawnDelay, false);
+
 	SetLifeSpan(DeathSpriteHideDelay + 1.5f);
 }
 
@@ -304,15 +381,51 @@ void AEnemyCharacter::HideDeathSprite()
 		RC->SetVisibility(false);
 }
 
+void AEnemyCharacter::SpawnSpiritDrops()
+{
+	if (!SpiritPickupClass) return;
+	const FVector DeathLoc = GetActorLocation();
+	const float   SpawnY   = CachedPlayer ? CachedPlayer->GetActorLocation().Y : DeathLoc.Y;
+	for (int32 i = 0; i < SpiritDropCount; ++i)
+	{
+		const FVector DropOffset = FVector(FMath::RandRange(-30.f, 30.f), 0.f, FMath::RandRange(5.f, 25.f));
+		const FVector SpawnLoc   = FVector(DeathLoc.X + DropOffset.X, SpawnY, DeathLoc.Z + DropOffset.Z);
+		GetWorld()->SpawnActor<ASpiritPickup>(SpiritPickupClass, SpawnLoc, FRotator::ZeroRotator);
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+void AEnemyCharacter::EndStagger()
+{
+	bIsStaggered   = false;
+	bStaggerImmune = true;
+	// Brief immune window so the enemy can respond before being staggered again
+	GetWorldTimerManager().SetTimer(StaggerImmuneHandle,
+		[this]() { bStaggerImmune = false; }, StaggerDuration * 2.f, false);
+}
+
+void AEnemyCharacter::EndHurt()
+{
+	bIsHurt = false;
+}
+
 void AEnemyCharacter::PlayFootstep()
 {
-	if (!bIsChasing || bIsDead || bIsDashAttacking) return;
-	if (FootstepSound)
-		UGameplayStatics::PlaySoundAtLocation(GetWorld(), FootstepSound, GetActorLocation());
+	if (bIsDead || !FootstepSound) return;
+	const bool bIsMoving = GetCharacterMovement()->Velocity.SizeSquared2D() > 100.f;
+	if (!bIsMoving) return;
+
+	float Volume = FootstepVolume;
+	if (CachedPlayer)
+	{
+		const float Dist = FVector::Dist(GetActorLocation(), CachedPlayer->GetActorLocation());
+		Volume = FootstepVolume * FMath::Clamp(1.f - (Dist / FootstepMaxHearDistance), 0.f, 1.f);
+	}
+	if (Volume > 0.f)
+		UGameplayStatics::PlaySoundAtLocation(GetWorld(), FootstepSound, GetActorLocation(), Volume);
 }
 
 void AEnemyCharacter::UpdateFacing(float XDir)

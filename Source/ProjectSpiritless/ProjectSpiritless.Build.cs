@@ -19,7 +19,9 @@ public class ProjectSpiritless : ModuleRules
 			"CinematicCamera",
 			"UMG",
 			"Slate",
-			"SlateCore"
+			"SlateCore",
+			"Niagara",
+			"NiagaraCore"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

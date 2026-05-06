@@ -23,7 +23,15 @@
 	"extensions": {
 		"recommendations": [
 			"ms-vscode.cpptools",
-			"ms-dotnettools.csharp"
+			"ms-vscode.cpptools-extension-pack",
+			"ms-dotnettools.csharp",
+			"usernamehw.errorlens",
+			"eamodio.gitlens",
+			"PKief.material-icon-theme",
+			"formulahendry.code-runner",
+			"oderwat.indent-rainbow",
+			"christian-kohler.path-intellisense",
+			"streetsidesoftware.code-spell-checker"
 		]
 	},
 	"tasks": {

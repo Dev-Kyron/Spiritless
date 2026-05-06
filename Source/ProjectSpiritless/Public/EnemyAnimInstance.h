@@ -24,6 +24,10 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "State")
 	bool bIsDashAttacking = false;
 
+	// Hurt flash (hit reaction)
+	UPROPERTY(BlueprintReadOnly, Category = "State")
+	bool bIsHurt = false;
+
 	// Dead
 	UPROPERTY(BlueprintReadOnly, Category = "State")
 	bool bIsDead = false;

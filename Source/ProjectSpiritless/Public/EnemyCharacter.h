@@ -7,6 +7,7 @@
 
 class APlayerCharacter;
 class UWidgetComponent;
+class UNiagaraSystem;
 
 UCLASS(Blueprintable, BlueprintType)
 class PROJECTSPIRITLESS_API AEnemyCharacter : public APaperZDCharacter
@@ -89,9 +90,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|DashAttack")
 	float DashAttackSliceDamageMultiplier = 1.0f;
 
+	// ── Combat feel ───────────────────────────────────────────────────────────
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Feel")
+	float KnockbackForce = 400.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Feel")
+	float StaggerDuration = 0.25f;
+
 	// ── Detection ─────────────────────────────────────────────────────────────
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	float DetectionRange = 2000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	float AggroDropMultiplier = 1.5f;
 
 	// ── State (ABP readable) ──────────────────────────────────────────────────
 	UPROPERTY(BlueprintReadOnly, Category = "State")
@@ -103,6 +114,30 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "State")
 	bool bIsDashAttacking = false;
 
+	UPROPERTY(BlueprintReadOnly, Category = "State")
+	bool bIsStaggered = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "State")
+	bool bIsHurt = false;
+
+	// How long the hurt anim flash plays
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Feel")
+	float HurtAnimDuration = 0.25f;
+
+	// ── AI ────────────────────────────────────────────────────────────────────
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Patrol")
+	bool bPatrolEnabled = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Patrol")
+	float PatrolDistance = 300.f;
+
+	// ── Drops ─────────────────────────────────────────────────────────────────
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drops")
+	TSubclassOf<AActor> SpiritPickupClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drops")
+	int32 SpiritDropCount = 1;
+
 	// ── Audio ─────────────────────────────────────────────────────────────────
 	// Assign sound assets in BP_Enemy1 Details
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
@@ -111,17 +146,46 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
 	float FootstepInterval = 0.38f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound|Volume", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float FootstepVolume = 0.015f;
+
+	// Distance at which footsteps become fully silent (linear falloff from 0 to this distance)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound|Volume", meta = (ClampMin = "100.0"))
+	float FootstepMaxHearDistance = 2000.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
 	USoundBase* MeleeAttackSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound|Volume", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float MeleeAttackVolume = 1.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
 	USoundBase* DashAttackSound;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound|Volume", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float DashAttackVolume = 1.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
 	USoundBase* TakeDamageSound;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound|Volume", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float TakeDamageVolume = 1.0f;
+
+	// ── VFX ───────────────────────────────────────────────────────────────────
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+	UNiagaraSystem* HitFX;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+	UNiagaraSystem* WalkTrailFX;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+	float TrailInterval = 0.07f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
 	USoundBase* DeathSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound|Volume", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float DeathVolume = 1.0f;
 
 	// ── Health Bar ────────────────────────────────────────────────────────────
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI")
@@ -134,9 +198,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	float DeathSpriteHideDelay = 0.45f;
 
+	// Delay before spirit orbs appear after death
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drops")
+	float SpiritSpawnDelay = 0.6f;
+
 private:
 	void Die();
 	void HideDeathSprite();
+	void SpawnSpiritDrops();
 
 	// Melee
 	void PerformMeleeAttack();
@@ -153,9 +222,14 @@ private:
 	void UpdateFacing(float XDir);
 	void RefreshHealthBar();
 
-	bool bMeleeOnCooldown      = false;
-	bool bDashAttackOnCooldown = false;
-	bool bIsFacingRight        = true;
+	bool  bMeleeOnCooldown      = false;
+	bool  bDashAttackOnCooldown = false;
+	bool  bStaggerImmune        = false;
+	bool  bIsFacingRight        = true;
+	bool  bIsAggro              = false;
+	bool  bPatrollingRight      = true;
+	float TrailAccumulator      = 0.f;
+	FVector PatrolOrigin;
 
 	APlayerCharacter*      CachedPlayer   = nullptr;
 	UEnemyHealthBarWidget* HealthBarWidget = nullptr;
@@ -168,6 +242,12 @@ private:
 	FTimerHandle DashAttackCooldownHandle;
 	FTimerHandle FootstepTimerHandle;
 	FTimerHandle DeathSpriteHideHandle;
+	FTimerHandle StaggerHandle;
+	FTimerHandle StaggerImmuneHandle;
+	FTimerHandle HurtAnimHandle;
+	FTimerHandle SpiritSpawnHandle;
 
 	void PlayFootstep();
+	void EndStagger();
+	void EndHurt();
 };
