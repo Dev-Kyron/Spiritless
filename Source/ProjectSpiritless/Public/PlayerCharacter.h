@@ -69,6 +69,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Occlusion", meta = (ClampMin = "1.0"))
 	float OcclusionSweepRadius = 12.f;
 
+	// How quickly the camera trails behind horizontal movement (higher = snappier)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "1.0"))
+	float CameraLagSpeed = 7.0f;
+
+	// Camera pivot shifts upward by this scale * Z velocity, keeping fast upward attacks on-screen
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "0.0"))
+	float CameraVerticalLeadScale = 0.07f;
+
+	// Max extra upward pivot shift (units) — caps how far the camera leads above the player
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "0.0"))
+	float CameraVerticalLeadMax = 160.0f;
+
+	// Interpolation speed for the vertical lead adjustment
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "1.0"))
+	float CameraVerticalLeadSpeed = 8.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
 	ACameraActor* DeathCamera;
 
@@ -102,6 +118,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
 	UInputAction* IA_Interact;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* IA_Esc;
 
 	// ── Attack animations ─────────────────────────────────────────────────────
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat|Animations")
@@ -194,7 +213,7 @@ public:
 	float DashDuration = 0.08f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement|Dash")
-	float DashCooldown = 0.25f;
+	float DashCooldown = 3.0f;
 
 	// Frames of the dash anim to show before vanishing (at 15fps, 3 frames ≈ 0.2s)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement|Dash")
@@ -229,7 +248,7 @@ public:
 	float HealPercent = 0.15f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Heal")
-	float HealCooldown = 8.f;
+	float HealCooldown = 90.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Heal")
 	float HealDuration = 1.2f;
@@ -340,6 +359,22 @@ public:
 	// Assign WBP_PlayerHealthBar in BP_Hero Details panel
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
 	TSubclassOf<UPlayerHealthBarWidget> HealthBarClass;
+
+	// Assign WDG_Tips_04 here — shown only on New Game, dismissed by A/D press
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
+	TSubclassOf<UUserWidget> TipsWidgetClass;
+
+	// Assign the pause menu widget class here
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
+	TSubclassOf<UUserWidget> PauseMenuClass;
+
+	// Called by the pause menu Resume button
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void ResumePauseMenu();
+
+	// Called by the pause menu Quit button (also usable from Blueprint)
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void GoToMainMenu();
 
 	// ── Camera effects ────────────────────────────────────────────────────────
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
@@ -555,6 +590,17 @@ private:
 
 	// Interact
 	void Interact();
+
+	// ESC — toggle pause menu open/closed
+	void TogglePauseMenu();
+
+	// Tips overlay — shown on New Game, cleared on first A/D press
+	UPROPERTY()
+	UUserWidget* TipsWidget = nullptr;
+	void DismissTips();
+
+	UPROPERTY()
+	UUserWidget* PauseMenuWidget = nullptr;
 
 	// Throw
 	bool  IsNearWall() const;

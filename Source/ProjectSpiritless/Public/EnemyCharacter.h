@@ -211,6 +211,7 @@ private:
 	void PerformMeleeAttack();
 	void OnMeleeHit1();
 	void OnMeleeHit2();
+	void DoMeleeHitCheck();
 	void ResetMeleeCooldown();
 
 	// Dash attack

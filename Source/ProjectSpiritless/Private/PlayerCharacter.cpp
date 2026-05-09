@@ -4,6 +4,7 @@
 #include "SpiritDepositPoint.h"
 #include "SpiritHUDWidget.h"
 #include "PlayerHealthBarWidget.h"
+#include "SpiritlessGameInstance.h"
 #include "Blueprint/UserWidget.h"
 
 #include "CineCameraComponent.h"
@@ -41,6 +42,9 @@ APlayerCharacter::APlayerCharacter()
 	CameraBoom->bInheritYaw           = false;
 	CameraBoom->SetRelativeRotation(FRotator(-7.f, -90.f, 0.f));
 	CameraBoom->TargetOffset          = FVector(0.f, 0.f, 50.f);
+	CameraBoom->bEnableCameraLag      = true;
+	CameraBoom->CameraLagSpeed        = 7.0f;
+	CameraBoom->CameraLagMaxDistance  = 130.0f;
 
 	SideCamera = CreateDefaultSubobject<UCineCameraComponent>(TEXT("SideCamera"));
 	SideCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
@@ -94,7 +98,9 @@ void APlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
-	CurrentHealth = MaxHealth;
+	CurrentHealth        = MaxHealth;
+	SpiritCount          = 0;
+	DepositedSpiritCount = 0;
 
 	if (APlayerCameraManager* CM = UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0))
 		CM->StartCameraFade(1.f, 0.f, 1.25f, FLinearColor::Black, false, false);
@@ -162,6 +168,16 @@ void APlayerCharacter::BeginPlay()
 			{
 				HealthBarWidget->AddToViewport();
 				HealthBarWidget->RefreshOrbs(CurrentHealth, MaxHealth);
+			}
+		}
+
+		if (USpiritlessGameInstance* GI = Cast<USpiritlessGameInstance>(GetGameInstance()))
+		{
+			if (GI->bIsNewGame && TipsWidgetClass)
+			{
+				GI->bIsNewGame = false;
+				TipsWidget = CreateWidget<UUserWidget>(PC, TipsWidgetClass);
+				if (TipsWidget) TipsWidget->AddToViewport(50);
 			}
 		}
 	}
@@ -294,6 +310,18 @@ void APlayerCharacter::Tick(float DeltaTime)
 		}
 	}
 
+	// During S_Attack3 (the upward launch combo finisher), snap the camera to the player
+	// instantly so the character is never lost off-screen. All other movement uses the
+	// softer lag speed so the camera trails behind naturally.
+	CameraBoom->CameraLagSpeed = (bIsAttacking && ComboStep == 3) ? 60.f : CameraLagSpeed;
+
+	// Shift the camera pivot upward proportional to the player's Z velocity so fast
+	// vertical movement (S_Attack3 launch) keeps the character within frame.
+	const float TargetOffsetZ = 50.f + FMath::Clamp(
+		GetVelocity().Z * CameraVerticalLeadScale, -60.f, CameraVerticalLeadMax);
+	CameraBoom->TargetOffset.Z = FMath::FInterpTo(
+		CameraBoom->TargetOffset.Z, TargetOffsetZ, DeltaTime, CameraVerticalLeadSpeed);
+
 	UpdateCameraOcclusion(DeltaTime);
 
 	if (UHeroAnimInstance* Anim = GetHeroAnim())
@@ -333,6 +361,8 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 			EIC->BindAction(IA_Heal,      ETriggerEvent::Started, this, &APlayerCharacter::StartHeal);
 		if (IA_Interact)
 			EIC->BindAction(IA_Interact,  ETriggerEvent::Started, this, &APlayerCharacter::Interact);
+		if (IA_Esc)
+			EIC->BindAction(IA_Esc,       ETriggerEvent::Started, this, &APlayerCharacter::TogglePauseMenu);
 	}
 
 	PlayerInputComponent->BindKey(EKeys::AnyKey, IE_Pressed, this, &APlayerCharacter::RestartLevel);
@@ -344,6 +374,7 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 
 void APlayerCharacter::Move(const FInputActionValue& Value)
 {
+	DismissTips();
 	if (bIsDead || bIsAttacking || bIsAirAttacking || bIsHealing || bIsDefendBroken || bIsDefending) return;
 	const float Axis = Value.Get<float>();
 	AddMovementInput(FVector(1.f, 0.f, 0.f), Axis);
@@ -881,6 +912,9 @@ float APlayerCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Damag
 		return Absorbed;
 	}
 
+	if (USpiritlessGameInstance* GI = Cast<USpiritlessGameInstance>(GetGameInstance()))
+		DamageAmount *= GI->GetPlayerDamageTakenMultiplier();
+
 	const float Applied = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 	CurrentHealth = FMath::Clamp(CurrentHealth - Applied, 0.f, MaxHealth);
 	RefreshHealthBar();
@@ -917,6 +951,19 @@ float APlayerCharacter::TakeDamage(float DamageAmount, FDamageEvent const& Damag
 void APlayerCharacter::Die()
 {
 	if (bIsDead) return;
+
+	// Close the pause menu and unpause so the death sequence runs correctly
+	if (PauseMenuWidget)
+	{
+		PauseMenuWidget->RemoveFromParent();
+		PauseMenuWidget = nullptr;
+		UGameplayStatics::SetGamePaused(GetWorld(), false);
+		if (APlayerController* PC = Cast<APlayerController>(GetController()))
+		{
+			PC->SetInputMode(FInputModeGameOnly());
+			PC->bShowMouseCursor = false;
+		}
+	}
 
 	bIsDead         = true;
 	bIsDefending    = false;
@@ -1018,6 +1065,79 @@ void APlayerCharacter::RestartLevel()
 	UGameplayStatics::OpenLevel(this, FName(*GetWorld()->GetName()));
 }
 
+void APlayerCharacter::DismissTips()
+{
+	if (TipsWidget)
+	{
+		TipsWidget->RemoveFromParent();
+		TipsWidget = nullptr;
+	}
+}
+
+void APlayerCharacter::TogglePauseMenu()
+{
+	if (bIsDead || bWaitingForDeathInput) return;
+
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC) return;
+
+	if (PauseMenuWidget && PauseMenuWidget->IsInViewport())
+	{
+		ResumePauseMenu();
+	}
+	else
+	{
+		if (!PauseMenuClass) return;
+		PauseMenuWidget = CreateWidget<UUserWidget>(PC, PauseMenuClass);
+		if (!PauseMenuWidget) return;
+
+		PauseMenuWidget->AddToViewport(200);
+		UGameplayStatics::SetGamePaused(GetWorld(), true);
+
+		FInputModeGameAndUI InputMode;
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(InputMode);
+		PC->bShowMouseCursor = true;
+	}
+}
+
+void APlayerCharacter::ResumePauseMenu()
+{
+	if (PauseMenuWidget)
+	{
+		PauseMenuWidget->RemoveFromParent();
+		PauseMenuWidget = nullptr;
+	}
+
+	UGameplayStatics::SetGamePaused(GetWorld(), false);
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		PC->SetInputMode(FInputModeGameOnly());
+		PC->bShowMouseCursor = false;
+	}
+}
+
+void APlayerCharacter::GoToMainMenu()
+{
+	DismissTips();
+
+	if (PauseMenuWidget)
+	{
+		PauseMenuWidget->RemoveFromParent();
+		PauseMenuWidget = nullptr;
+	}
+	UGameplayStatics::SetGamePaused(GetWorld(), false);
+
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	{
+		FInputModeUIOnly InputMode;
+		PC->SetInputMode(InputMode);
+		PC->bShowMouseCursor = true;
+	}
+	UGameplayStatics::OpenLevel(this, FName("MainMenu"));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1075,6 +1195,8 @@ void APlayerCharacter::UpdateCameraOcclusion(float DeltaTime)
 	for (auto& Pair : OccluderOpacity)
 	{
 		UPrimitiveComponent* Prim = Pair.Key;
+		// Component may have been destroyed since last frame — treat as fully restored
+		if (!IsValid(Prim)) { ToRemove.Add(Prim); continue; }
 		if (ThisFrameOccluders.Contains(Prim)) continue;
 
 		float& CurrentOpacity = Pair.Value;

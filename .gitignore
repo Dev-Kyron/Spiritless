@@ -30,3 +30,10 @@ Saved/
 # Plugin binaries/intermediate (keep source)
 Plugins/**/Binaries/
 Plugins/**/Intermediate/
+
+# Claude Code internal session data
+.claude/
+
+# Python cache
+__pycache__/
+*.pyc

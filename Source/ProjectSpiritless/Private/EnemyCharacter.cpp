@@ -2,6 +2,7 @@
 #include "EnemyAnimInstance.h"
 #include "PlayerCharacter.h"
 #include "SpiritPickup.h"
+#include "SpiritlessGameInstance.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -44,6 +45,13 @@ AEnemyCharacter::AEnemyCharacter()
 void AEnemyCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Scale stats by difficulty before setting CurrentHealth
+	if (USpiritlessGameInstance* GI = Cast<USpiritlessGameInstance>(GetGameInstance()))
+	{
+		MaxHealth    *= GI->GetEnemyHealthMultiplier();
+		AttackDamage *= GI->GetEnemyDamageMultiplier();
+	}
 
 	CurrentHealth = MaxHealth;
 	GetCharacterMovement()->MaxWalkSpeed = ChaseSpeed;
@@ -241,7 +249,7 @@ void AEnemyCharacter::PerformMeleeAttack()
 		&AEnemyCharacter::ResetMeleeCooldown, AttackCooldown, false);
 }
 
-void AEnemyCharacter::OnMeleeHit1()
+void AEnemyCharacter::DoMeleeHitCheck()
 {
 	if (!CachedPlayer || bIsDead) return;
 	const float Dist = FVector::Dist(GetActorLocation(), CachedPlayer->GetActorLocation());
@@ -250,14 +258,8 @@ void AEnemyCharacter::OnMeleeHit1()
 			GetController(), this, UDamageType::StaticClass());
 }
 
-void AEnemyCharacter::OnMeleeHit2()
-{
-	if (!CachedPlayer || bIsDead) return;
-	const float Dist = FVector::Dist(GetActorLocation(), CachedPlayer->GetActorLocation());
-	if (Dist <= AttackRange * 1.2f)
-		UGameplayStatics::ApplyDamage(CachedPlayer, AttackDamage * 0.5f,
-			GetController(), this, UDamageType::StaticClass());
-}
+void AEnemyCharacter::OnMeleeHit1() { DoMeleeHitCheck(); }
+void AEnemyCharacter::OnMeleeHit2() { DoMeleeHitCheck(); }
 
 void AEnemyCharacter::ResetMeleeCooldown()
 {
