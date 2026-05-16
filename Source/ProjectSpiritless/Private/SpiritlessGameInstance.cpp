@@ -42,6 +42,18 @@ void USpiritlessGameInstance::Shutdown()
 
 // ── Loading Screen ────────────────────────────────────────────────────────────
 
+void USpiritlessGameInstance::PreloadGameLevel()
+{
+	if (bLevelPreloadStarted || GameLevelToPreload.IsNull()) return;
+	bLevelPreloadStarted = true;
+
+	// Kick off an async package load for the game level. This streams all hard-referenced
+	// assets (textures, meshes, audio, Niagara) into memory in the background while the
+	// player is still on the menu. OpenLevel will find everything cached and load fast.
+	const FString PackageName = GameLevelToPreload.ToSoftObjectPath().GetLongPackageName();
+	LoadPackageAsync(PackageName);
+}
+
 void USpiritlessGameInstance::OnPreLoadMap(const FString& MapName)
 {
 	if (MapName.Contains(TEXT("PlatformLVL1")))
@@ -140,6 +152,64 @@ void USpiritlessGameInstance::ApplyResolution(int32 Width, int32 Height, int32 W
 #endif
 }
 
+// ── Graphics Quality ──────────────────────────────────────────────────────────
+
+FGraphicsQualitySettings USpiritlessGameInstance::GetCurrentGraphicsSettings() const
+{
+	FGraphicsQualitySettings Out;
+	UGameUserSettings* GUS = UGameUserSettings::GetGameUserSettings();
+	if (!GUS) return Out;
+
+	Out.AntiAliasing = GUS->GetAntiAliasingQuality();
+	Out.Shadow       = GUS->GetShadowQuality();
+	Out.Texture      = GUS->GetTextureQuality();
+	Out.Foliage      = GUS->GetFoliageQuality();
+	Out.PostProcess  = GUS->GetPostProcessingQuality();
+	Out.ViewDistance = GUS->GetViewDistanceQuality();
+	Out.bVSync       = GUS->IsVSyncEnabled();
+
+	// OverallLevel is the shared preset if every setting matches, otherwise -1 (mixed)
+	Out.OverallLevel = GUS->GetOverallScalabilityLevel();
+	return Out;
+}
+
+bool USpiritlessGameInstance::HasUnappliedGraphicsChanges(const FGraphicsQualitySettings& Pending) const
+{
+	const FGraphicsQualitySettings Current = GetCurrentGraphicsSettings();
+	return Pending.AntiAliasing != Current.AntiAliasing
+	    || Pending.Shadow       != Current.Shadow
+	    || Pending.Texture      != Current.Texture
+	    || Pending.Foliage      != Current.Foliage
+	    || Pending.PostProcess  != Current.PostProcess
+	    || Pending.ViewDistance != Current.ViewDistance
+	    || Pending.bVSync       != Current.bVSync;
+}
+
+void USpiritlessGameInstance::ApplyGraphicsQualitySettings(const FGraphicsQualitySettings& Settings)
+{
+	UGameUserSettings* GUS = UGameUserSettings::GetGameUserSettings();
+	if (!GUS) return;
+
+	if (Settings.OverallLevel >= 0)
+	{
+		// Preset — sets every sg.* to the same level in one call
+		GUS->SetOverallScalabilityLevel(Settings.OverallLevel);
+	}
+	else
+	{
+		// Individual overrides
+		GUS->SetAntiAliasingQuality(Settings.AntiAliasing);
+		GUS->SetShadowQuality(Settings.Shadow);
+		GUS->SetTextureQuality(Settings.Texture);
+		GUS->SetFoliageQuality(Settings.Foliage);
+		GUS->SetPostProcessingQuality(Settings.PostProcess);
+		GUS->SetViewDistanceQuality(Settings.ViewDistance);
+	}
+
+	GUS->SetVSyncEnabled(Settings.bVSync);
+	GUS->ApplySettings(false); // applies + saves to GameUserSettings.ini
+}
+
 void USpiritlessGameInstance::OnPostLoadMap(UWorld* LoadedWorld)
 {
 	if (!LoadedWorld) return;
@@ -153,6 +223,11 @@ void USpiritlessGameInstance::OnPostLoadMap(UWorld* LoadedWorld)
 			Window->SetSizingRule(ESizingRule::FixedSize);
 	}
 #endif
+
+	// Reset preload guard when returning to the main menu so WDG_game_04 triggers it again
+	// if the player dies, comes back, and navigates to that screen a second time.
+	if (!LoadedWorld->GetName().Contains(TEXT("PlatformLVL1")))
+		bLevelPreloadStarted = false;
 
 	// Schedule menu music — store the world so the callback uses the right context
 	if (!LoadedWorld->GetName().Contains(TEXT("PlatformLVL1")))

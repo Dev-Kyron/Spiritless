@@ -20,9 +20,8 @@ AEnemyCharacter::AEnemyCharacter()
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 
 	GetCapsuleComponent()->InitCapsuleSize(22.f, 52.f);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 
-	GetCharacterMovement()->SetPlaneConstraintEnabled(true);
-	GetCharacterMovement()->SetPlaneConstraintAxisSetting(EPlaneConstraintAxisSetting::Y);
 	GetCharacterMovement()->GravityScale              = 1.4f;
 	GetCharacterMovement()->MaxWalkSpeed              = 350.f;
 	GetCharacterMovement()->GroundFriction            = 8.f;

@@ -35,24 +35,25 @@ APlayerCharacter::APlayerCharacter()
 
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
-	CameraBoom->TargetArmLength       = 1700.f;
+	CameraBoom->TargetArmLength       = 3000.f;
 	CameraBoom->bDoCollisionTest      = false;
 	CameraBoom->bInheritPitch         = false;
 	CameraBoom->bInheritRoll          = false;
 	CameraBoom->bInheritYaw           = false;
-	CameraBoom->SetRelativeRotation(FRotator(-7.f, -90.f, 0.f));
+	CameraBoom->SetRelativeRotation(FRotator(-5.f, -90.f, 0.f));
 	CameraBoom->TargetOffset          = FVector(0.f, 0.f, 50.f);
 	CameraBoom->bEnableCameraLag      = true;
-	CameraBoom->CameraLagSpeed        = 7.0f;
-	CameraBoom->CameraLagMaxDistance  = 130.0f;
+	CameraBoom->CameraLagSpeed        = 5.0f;
+	CameraBoom->CameraLagMaxDistance  = 180.0f;
 
 	SideCamera = CreateDefaultSubobject<UCineCameraComponent>(TEXT("SideCamera"));
 	SideCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	SideCamera->bUsePawnControlRotation = false;
-	SideCamera->CurrentAperture        = 1.4f;
-	SideCamera->CurrentFocalLength     = 50.f;
-	SideCamera->FocusSettings.FocusMethod         = ECameraFocusMethod::Manual;
-	SideCamera->FocusSettings.ManualFocusDistance = 1500.f;
+	SideCamera->SetRelativeRotation(FRotator(0.5f, 0.f, 0.f));
+	SideCamera->CurrentFocalLength      = 85.f;
+	SideCamera->CurrentAperture         = 1.2f;   // f/1.2 — compensates for longer boom, keeps heavy fore/background blur
+	SideCamera->FocusSettings.FocusMethod = ECameraFocusMethod::Manual;
+	SideCamera->FocusSettings.ManualFocusDistance = 3000.f; // matches boom arm length
 
 	GetCharacterMovement()->SetPlaneConstraintEnabled(true);
 	GetCharacterMovement()->SetPlaneConstraintAxisSetting(EPlaneConstraintAxisSetting::Y);
@@ -101,6 +102,30 @@ void APlayerCharacter::BeginPlay()
 	CurrentHealth        = MaxHealth;
 	SpiritCount          = 0;
 	DepositedSpiritCount = 0;
+
+	LockedY = GetActorLocation().Y;
+	GetCharacterMovement()->SetPlaneConstraintOrigin(GetActorLocation());
+
+	// Start fully desaturated — colour is earned by depositing spirits.
+	// Uses a post-process material so spirit orb pixels (stencil 2) are excluded.
+	CurrentCameraSaturation = 0.f;
+	TargetCameraSaturation  = 0.f;
+	if (DesaturationMaterial)
+	{
+		DesaturationMID = UMaterialInstanceDynamic::Create(DesaturationMaterial, this);
+		DesaturationMID->SetScalarParameterValue(FName("Saturation"), 0.f);
+		FWeightedBlendable Blendable;
+		Blendable.Object = DesaturationMID;
+		Blendable.Weight = 1.f;
+		SideCamera->PostProcessSettings.WeightedBlendables.Array.Add(Blendable);
+	}
+	SideCamera->PostProcessBlendWeight = 1.f;
+
+	// Switch to actor-tracking focus so DoF stays sharp on the character at all times,
+	// including during the 4th attack jump when the capsule moves vertically.
+	SideCamera->FocusSettings.FocusMethod = ECameraFocusMethod::Tracking;
+	SideCamera->FocusSettings.TrackingFocusSettings.ActorToTrack    = this;
+	SideCamera->FocusSettings.TrackingFocusSettings.RelativeOffset  = FVector::ZeroVector;
 
 	if (APlayerCameraManager* CM = UGameplayStatics::GetPlayerCameraManager(GetWorld(), 0))
 		CM->StartCameraFade(1.f, 0.f, 1.25f, FLinearColor::Black, false, false);
@@ -243,7 +268,7 @@ void APlayerCharacter::Tick(float DeltaTime)
 
 		bIsWallSliding = bWallOnRight || bWallOnLeft;
 
-		if (bIsWallSliding)
+		if (bIsWallSliding && !bIsAttacking && !bIsHurt)
 		{
 			// Face away from the wall so the slide sprite renders correctly
 			const bool bWantRight = bWallOnLeft; // wall on left → face right (and vice versa)
@@ -310,19 +335,72 @@ void APlayerCharacter::Tick(float DeltaTime)
 		}
 	}
 
-	// During S_Attack3 (the upward launch combo finisher), snap the camera to the player
-	// instantly so the character is never lost off-screen. All other movement uses the
-	// softer lag speed so the camera trails behind naturally.
-	CameraBoom->CameraLagSpeed = (bIsAttacking && ComboStep == 3) ? 60.f : CameraLagSpeed;
+	// Drive the capsule along a sine arc during the 4th attack so the camera has a real
+	// position to follow. Movement is disabled for the duration so the ABP never sees
+	// IsFalling and won't override the attack animation.
+	if (bIsAttack4Jumping)
+	{
+		Attack4JumpElapsed += DeltaTime;
+		// Arc must complete exactly when the attack timer fires. The arc starts Attack4JumpDelay
+		// seconds after the attack, so its available window is Attack4Duration - Attack4JumpDelay.
+		// Using Attack4Duration here would end the arc AFTER the attack timer, causing ResetCombo
+		// to call EndAttack4Jump mid-arc with the capsule above ground — hence the bounce/glitch.
+		const float ArcDuration = FMath::Max(Attack4Duration - Attack4JumpDelay, 0.01f);
+		const float T    = FMath::Min(Attack4JumpElapsed / ArcDuration, 1.f);
+		FVector     Loc  = GetActorLocation();
+		Loc.Z            = Attack4JumpGroundZ + Attack4PeakHeight * FMath::Sin(PI * T);
+		SetActorLocation(Loc, false, nullptr, ETeleportType::TeleportPhysics);
+		if (T >= 1.f)
+			EndAttack4Jump();
+	}
 
-	// Shift the camera pivot upward proportional to the player's Z velocity so fast
-	// vertical movement (S_Attack3 launch) keeps the character within frame.
+	// Keep lag always enabled — toggling bEnableCameraLag mid-frame leaves the spring arm's
+	// internal previous-position stale and causes a snap when re-enabled. Scale lag speed by
+	// attack intensity so action frames stay inside the camera frame throughout the full combo.
+	const bool bIsLaunchAttack = bIsAttacking && (ComboStep == 3 || ComboStep == 4);
+	CameraBoom->bEnableCameraLag    = true;
+	CameraBoom->CameraLagSpeed      = bIsLaunchAttack ? 30.f
+	                                : bIsAttacking    ? AttackCameraLagSpeed
+	                                :                   CameraLagSpeed;
+	// Keep CameraLagMaxDistance constant — changing it at attack-end causes the spring arm
+	// to suddenly release any lag it was capping, producing a visible camera lurch.
+	CameraBoom->CameraLagMaxDistance = 180.f;
+
+	// Smoothly tilt the camera up only on the last (4th) attack, then return to base pitch.
+	const bool  bIsLastAttack = bIsAttacking && ComboStep == 4;
+	const float TargetPitch   = CameraBasePitch + (bIsLastAttack ? Attack4CameraPitchTilt : 0.f);
+	FRotator    BoomRot       = CameraBoom->GetRelativeRotation();
+	BoomRot.Pitch             = FMath::FInterpTo(BoomRot.Pitch, TargetPitch, DeltaTime, Attack4CameraTiltSpeed);
+	CameraBoom->SetRelativeRotation(BoomRot);
+
+	// Suppress velocity-based offset during the arc — movement is disabled then, so
+	// GetVelocity().Z can spike when MOVE_Walking is restored and jerk the camera.
+	// Use wider lead range during attacks to keep upward swing frames on-screen.
+	const float VelocityZ          = bIsAttack4Jumping ? 0.f : GetVelocity().Z;
+	const float EffectiveLeadScale = bIsAttacking ? AttackVerticalLeadScale : CameraVerticalLeadScale;
+	const float EffectiveLeadMax   = bIsAttacking ? AttackVerticalLeadMax   : CameraVerticalLeadMax;
 	const float TargetOffsetZ = 50.f + FMath::Clamp(
-		GetVelocity().Z * CameraVerticalLeadScale, -60.f, CameraVerticalLeadMax);
+		VelocityZ * EffectiveLeadScale, -60.f, EffectiveLeadMax);
 	CameraBoom->TargetOffset.Z = FMath::FInterpTo(
 		CameraBoom->TargetOffset.Z, TargetOffsetZ, DeltaTime, CameraVerticalLeadSpeed);
 
+	// Smoothly lerp camera saturation toward the target set by spirit deposits
+	if (DesaturationMID && !FMath::IsNearlyEqual(CurrentCameraSaturation, TargetCameraSaturation, 0.001f))
+	{
+		CurrentCameraSaturation = FMath::FInterpTo(
+			CurrentCameraSaturation, TargetCameraSaturation, DeltaTime, SaturationInterpSpeed);
+		DesaturationMID->SetScalarParameterValue(FName("Saturation"), CurrentCameraSaturation);
+	}
+
 	UpdateCameraOcclusion(DeltaTime);
+
+	// Hard-lock Y — terrain and physics cannot push the player off their 2D plane
+	FVector Loc = GetActorLocation();
+	if (!FMath::IsNearlyEqual(Loc.Y, LockedY, 0.5f))
+	{
+		Loc.Y = LockedY;
+		SetActorLocation(Loc, false, nullptr, ETeleportType::TeleportPhysics);
+	}
 
 	if (UHeroAnimInstance* Anim = GetHeroAnim())
 		Anim->SyncFromCharacter(this);
@@ -375,16 +453,22 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 void APlayerCharacter::Move(const FInputActionValue& Value)
 {
 	DismissTips();
-	if (bIsDead || bIsAttacking || bIsAirAttacking || bIsHealing || bIsDefendBroken || bIsDefending) return;
 	const float Axis = Value.Get<float>();
+
+	// Allow facing flip during attacks, heal, and block — air attack excluded as
+	// flipping mid-air-attack causes visual issues with the directional animation.
+	if (!bIsDead && !bIsAirAttacking)
+		UpdateFacingDirection(Axis);
+
+	if (bIsDead || bIsAttacking || bIsAirAttacking || bIsHealing || bIsDefendBroken || bIsDefending) return;
 	AddMovementInput(FVector(1.f, 0.f, 0.f), Axis);
-	UpdateFacingDirection(Axis);
 }
 
 void APlayerCharacter::UpdateFacingDirection(float MoveAxisValue)
 {
 	if (FMath::IsNearlyZero(MoveAxisValue)) return;
 	if (bIsWallSliding) return; // wall slide sets facing directly
+	if (bIsHurt) return;        // preserve facing during knockback recovery
 	const bool bWantsRight = MoveAxisValue > 0.f;
 	if (bWantsRight == bIsFacingRight) return;
 	bIsFacingRight = bWantsRight;
@@ -600,6 +684,15 @@ void APlayerCharacter::PlayAttackStep(int32 Step)
 
 	JumpToAttackState(Step);
 
+	// On the 4th attack, queue the capsule arc to fire after Attack4JumpDelay seconds
+	// so it lines up with the jump frame in the sprite animation rather than the attack start.
+	if (Step == 4)
+	{
+		GetWorldTimerManager().ClearTimer(Attack4JumpHandle);
+		GetWorldTimerManager().SetTimer(Attack4JumpHandle, this,
+			&APlayerCharacter::StartAttack4Jump, Attack4JumpDelay, false);
+	}
+
 	if (AttackSwingSound) UGameplayStatics::PlaySoundAtLocation(GetWorld(), AttackSwingSound, GetActorLocation(), AttackSwingVolume);
 
 	const float Duration = (Step == 1) ? Attack1Duration
@@ -635,6 +728,33 @@ void APlayerCharacter::ResetCombo()
 	bIsAttacking      = false;
 	bComboQueued      = false;
 	bAttackWindowOpen = false;
+	// Cancel pending attack timers — without this, dying mid-swing still lets the hit
+	// window open after death and apply damage to enemies from beyond the grave.
+	GetWorldTimerManager().ClearTimer(AttackTimerHandle);
+	GetWorldTimerManager().ClearTimer(HitTimerHandle);
+	GetWorldTimerManager().ClearTimer(Attack4JumpHandle);
+	EndAttack4Jump();
+}
+
+void APlayerCharacter::StartAttack4Jump()
+{
+	bIsAttack4Jumping  = true;
+	Attack4JumpElapsed = 0.f;
+	Attack4JumpGroundZ = GetActorLocation().Z;
+	GetCharacterMovement()->DisableMovement();
+}
+
+void APlayerCharacter::EndAttack4Jump()
+{
+	if (!bIsAttack4Jumping) return;
+	bIsAttack4Jumping = false;
+	// Hard-snap the capsule back to its original ground Z before restoring movement.
+	// If ResetCombo fires early (e.g. attack timer beats the arc), the capsule could be
+	// above ground when MOVE_Walking is set, causing physics to apply a correction bounce.
+	FVector Loc = GetActorLocation();
+	Loc.Z = Attack4JumpGroundZ;
+	SetActorLocation(Loc, false, nullptr, ETeleportType::TeleportPhysics);
+	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -829,6 +949,15 @@ void APlayerCharacter::EndHeal()
 void APlayerCharacter::ResetHealCooldown()
 {
 	bHealOnCooldown = false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Camera saturation — restored by depositing spirits
+// ─────────────────────────────────────────────────────────────────────────────
+
+void APlayerCharacter::OnSpiritDeposited()
+{
+	TargetCameraSaturation = FMath::Min(TargetCameraSaturation + SaturationPerDeposit, 1.0f);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

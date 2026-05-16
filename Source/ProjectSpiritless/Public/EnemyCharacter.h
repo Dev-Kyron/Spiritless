@@ -125,6 +125,11 @@ public:
 	float HurtAnimDuration = 0.25f;
 
 	// ── AI ────────────────────────────────────────────────────────────────────
+	// Y offset applied during combat to prevent sprite blending with the player.
+	// Set to -1 or +1 per enemy instance in the Blueprint Details panel.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
+	float CombatYOffset = -1.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Patrol")
 	bool bPatrolEnabled = true;
 
@@ -223,6 +228,7 @@ private:
 	void UpdateFacing(float XDir);
 	void RefreshHealthBar();
 
+	float LockedY               = 0.f;
 	bool  bMeleeOnCooldown      = false;
 	bool  bDashAttackOnCooldown = false;
 	bool  bStaggerImmune        = false;

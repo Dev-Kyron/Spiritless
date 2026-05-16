@@ -32,6 +32,11 @@ void ASpiritPickup::BeginPlay()
 {
 	Super::BeginPlay();
 	OriginLocation = GetActorLocation();
+
+	// Stencil value 2 — the desaturation post-process material reads this and skips
+	// desaturating these pixels so spirit orbs always appear in full colour.
+	SpriteComponent->SetRenderCustomDepth(true);
+	SpriteComponent->CustomDepthStencilValue = 2;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

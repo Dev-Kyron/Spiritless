@@ -12,6 +12,23 @@ enum class EDifficulty : uint8
 	Hard   UMETA(DisplayName = "Hard")
 };
 
+// Snapshot of every graphics quality knob — used to init the settings UI and detect unapplied changes.
+// Individual levels: 0=Low  1=Medium  2=High  3=Epic.  OverallLevel=-1 when settings are mixed.
+USTRUCT(BlueprintType)
+struct FGraphicsQualitySettings
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite) int32 OverallLevel    = 1;
+	UPROPERTY(BlueprintReadWrite) int32 AntiAliasing    = 1;
+	UPROPERTY(BlueprintReadWrite) int32 Shadow          = 1;
+	UPROPERTY(BlueprintReadWrite) int32 Texture         = 1;
+	UPROPERTY(BlueprintReadWrite) int32 Foliage         = 1;
+	UPROPERTY(BlueprintReadWrite) int32 PostProcess     = 1;
+	UPROPERTY(BlueprintReadWrite) int32 ViewDistance    = 1;
+	UPROPERTY(BlueprintReadWrite) bool  bVSync          = false;
+};
+
 class UAudioComponent;
 class USoundBase;
 class UUserWidget;
@@ -59,11 +76,37 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "Game")
 	bool bIsNewGame = false;
 
+	// Assign PlatformLVL1 (or whichever map the New Game / Continue buttons open) here
+	// in the GameInstance Blueprint Details panel.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Game")
+	TSoftObjectPtr<UWorld> GameLevelToPreload;
+
+	// Call from WDG_game_04 Event Construct so the engine starts streaming the game
+	// level package into memory while the player reads the menu. OpenLevel will then
+	// find the assets already cached and load near-instantly.
+	// Safe to call multiple times — only the first call does any work per menu visit.
+	UFUNCTION(BlueprintCallable, Category = "Game")
+	void PreloadGameLevel();
+
 	// ── Resolution ───────────────────────────────────────────────────────────
 	// Call from your settings widget to apply a fixed resolution.
 	// WindowMode: 0=Fullscreen  1=Borderless  2=Windowed (fixed size)
 	UFUNCTION(BlueprintCallable, Category = "Settings")
 	void ApplyResolution(int32 Width, int32 Height, int32 WindowMode = 2);
+
+	// ── Graphics Quality ──────────────────────────────────────────────────────
+	// Read all current quality values — call this to initialise the settings UI on open.
+	UFUNCTION(BlueprintPure, Category = "Settings")
+	FGraphicsQualitySettings GetCurrentGraphicsSettings() const;
+
+	// True if any value in Pending differs from what is currently applied.
+	UFUNCTION(BlueprintPure, Category = "Settings")
+	bool HasUnappliedGraphicsChanges(const FGraphicsQualitySettings& Pending) const;
+
+	// Apply and save all quality settings at once.
+	// Pass OverallLevel >= 0 to set everything to one preset; set it to -1 to use the individual values.
+	UFUNCTION(BlueprintCallable, Category = "Settings")
+	void ApplyGraphicsQualitySettings(const FGraphicsQualitySettings& Settings);
 
 	// ── Loading Screen ────────────────────────────────────────────────────────
 	// Assign WDG_Loading_04 here — shown automatically on any level load
@@ -144,6 +187,7 @@ private:
 
 	FTimerHandle LoadingHoldHandle;
 	FTimerHandle MusicStartHandle;
+	bool bLevelPreloadStarted = false;
 
 	// Weak ref to the world that requested music — used inside the delayed callback
 	TWeakObjectPtr<UWorld> MusicPendingWorld;

@@ -79,6 +79,7 @@ void ASpiritDepositPoint::TryDeposit(APlayerCharacter* Player)
 
 	Player->DepositedSpiritCount += Player->SpiritCount;
 	Player->SpiritCount           = 0;
+	Player->OnSpiritDeposited();
 
 	if (DepositSound)
 		UGameplayStatics::PlaySoundAtLocation(GetWorld(), DepositSound, GetActorLocation());

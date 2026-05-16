@@ -73,6 +73,55 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "1.0"))
 	float CameraLagSpeed = 7.0f;
 
+	// Lag speed applied during any attack step (tighter than idle to keep action frames on-screen)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "1.0"))
+	float AttackCameraLagSpeed = 15.0f;
+
+	// Max lag distance during attacks — reduces how far behind the camera can fall mid-combo
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "0.0"))
+	float AttackCameraLagMaxDistance = 80.0f;
+
+	// Vertical lead scale during attacks — higher keeps upward swings on-screen
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "0.0"))
+	float AttackVerticalLeadScale = 0.12f;
+
+	// Max extra upward offset during attacks
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "0.0"))
+	float AttackVerticalLeadMax = 220.0f;
+
+	// Base pitch of the camera boom at rest — keep in sync with the constructor value
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+	float CameraBasePitch = -5.f;
+
+	// ── Saturation ────────────────────────────────────────────────────────────
+	// Assign M_SelectiveDesaturate in BP_Hero Details — post-process material that reads
+	// the custom stencil and skips desaturation on spirit orb pixels (stencil value 2).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Saturation")
+	UMaterialInterface* DesaturationMaterial = nullptr;
+
+	// Saturation added each time the player deposits spirits (0.25 = 4 deposits for full colour)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Saturation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float SaturationPerDeposit = 0.25f;
+
+	// How quickly the saturation lerps to its new target after a deposit
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Saturation", meta = (ClampMin = "0.1"))
+	float SaturationInterpSpeed = 1.5f;
+
+	// Called by SpiritDepositPoint after each successful deposit
+	void OnSpiritDeposited();
+
+	// Read by WDG_HUD_04 to drive the Retainer Box desaturation material parameter
+	UFUNCTION(BlueprintPure, Category = "Camera|Saturation")
+	float GetCameraSaturation() const { return CurrentCameraSaturation; }
+
+	// Extra degrees of upward pitch tilt applied during S_Attack3 (positive = tilt up)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "0.0", ClampMax = "15.0"))
+	float Attack4CameraPitchTilt = 3.f;
+
+	// Interpolation speed for the pitch tilt transition in and out
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "0.1"))
+	float Attack4CameraTiltSpeed = 4.f;
+
 	// Camera pivot shifts upward by this scale * Z velocity, keeping fast upward attacks on-screen
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "0.0"))
 	float CameraVerticalLeadScale = 0.07f;
@@ -368,6 +417,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
 	TSubclassOf<UUserWidget> PauseMenuClass;
 
+	// Returns CurrentHealth / MaxHealth in [0,1] — use this in widget Blueprints instead
+	// of reading CurrentHealth + MaxHealth separately to avoid stale-reference issues
+	// caused by Blueprint load order on project startup.
+	UFUNCTION(BlueprintPure, Category = "Stats")
+	float GetHealthPercent() const { return (MaxHealth > 0.f) ? FMath::Clamp(CurrentHealth / MaxHealth, 0.f, 1.f) : 0.f; }
+
+	UFUNCTION(BlueprintPure, Category = "Spirits")
+	int32 GetSpiritCount() const { return SpiritCount; }
+
+	UFUNCTION(BlueprintPure, Category = "Spirits")
+	FText GetSpiritCountText() const { return FText::AsNumber(SpiritCount); }
+
 	// Called by the pause menu Resume button
 	UFUNCTION(BlueprintCallable, Category = "UI")
 	void ResumePauseMenu();
@@ -512,6 +573,18 @@ public:
 	float SpiritPickupVolume = 1.0f;
 
 	// ── Combat feel ───────────────────────────────────────────────────────────
+	// Forward momentum added at the start of each attack step — tune in BP_Hero Details
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Feel")
+	float AttackLungeForce = 250.f;
+
+	// Peak height the capsule rises during the 4th attack arc (tune in BP_Hero Details)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Feel")
+	float Attack4PeakHeight = 25.f;
+
+	// Seconds into the 4th attack before the capsule arc begins — sync to the jump frame in the sprite
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Feel", meta = (ClampMin = "0.0"))
+	float Attack4JumpDelay = 0.15f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Feel")
 	float HitStopDuration = 0.05f;
 
@@ -560,6 +633,9 @@ private:
 	void OnDeathFadeComplete();
 	void OnDeathInputReady();
 	void RestartLevel();
+
+	void StartAttack4Jump();
+	void EndAttack4Jump();
 
 	// Hit stop
 	void StartHitStop();
@@ -616,6 +692,13 @@ private:
 	// Per-component DMIs and their current faded opacity
 	TMap<UPrimitiveComponent*, TArray<UMaterialInstanceDynamic*>> OccluderDMIs;
 	TMap<UPrimitiveComponent*, float>                             OccluderOpacity;
+	float LockedY                   = 0.f;
+	float CurrentCameraSaturation  = 0.f;
+	float TargetCameraSaturation   = 0.f;
+	UMaterialInstanceDynamic* DesaturationMID = nullptr;
+	bool  bIsAttack4Jumping        = false;
+	float Attack4JumpElapsed  = 0.f;
+	float Attack4JumpGroundZ  = 0.f;
 	bool  bDashSpriteHidden   = false;
 	bool  bAttackWindowOpen   = false;
 	bool  bComboQueued        = false;
@@ -648,6 +731,7 @@ private:
 	FTimerHandle DefendBreakHandle;
 	FTimerHandle HealHandle;
 	FTimerHandle HealCooldownHandle;
+	FTimerHandle Attack4JumpHandle;
 
 	UHeroAnimInstance* GetHeroAnim() const;
 };
