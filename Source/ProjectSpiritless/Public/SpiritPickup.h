@@ -43,7 +43,7 @@ public:
 	float MagnetRadius = 200.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spirit")
-	float MagnetSpeed = 500.f;
+	float MagnetSpeed = 350.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
 	USoundBase* PickupSound;
